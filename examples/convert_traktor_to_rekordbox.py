@@ -5,6 +5,7 @@ Example script to convert a Traktor library to Rekordbox format
 import os
 import sys
 import argparse
+import logging
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -29,23 +30,40 @@ def main():
     parser = argparse.ArgumentParser(description='Convert Traktor library to Rekordbox format')
     parser.add_argument('input_file', help='Path to the Traktor NML file')
     parser.add_argument('output_file', help='Path to save the Rekordbox XML file')
-    parser.add_argument('--convert-hot-cues', action='store_true', 
+    parser.add_argument('--convert-hot-cues', action='store_true',
                         help='Convert hot cues to memory cues')
-    
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging')
+
     args = parser.parse_args()
-    
+
+    # Configure logging
+    logger = logging.getLogger('dj_conv')
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        handler.setLevel(logging.DEBUG)
+        print("Debug logging enabled")
+    else:
+        logger.setLevel(logging.INFO)
+        handler.setLevel(logging.INFO)
+
     # Initialize registries
     importer_registry = ImporterRegistry()
     exporter_registry = ExporterRegistry()
-    
+
     # Register importers and exporters
     importer_registry.register(TraktorImporter())
     exporter_registry.register(RekordboxExporter())
-    
+
     # Initialize use cases
     import_use_case = ImportLibraryUseCase(importer_registry)
     export_use_case = ExportLibraryUseCase(exporter_registry)
-    
+
     # Initialize services
     conversion_service = ConversionService()
     conversion_orchestrator = ConversionOrchestrator(
@@ -53,15 +71,15 @@ def main():
         export_use_case,
         conversion_service
     )
-    
+
     # Set progress callback
     conversion_orchestrator.set_progress_callback(progress_callback)
-    
+
     # Perform conversion
     options = {
         'convert_hot_cues_to_memory_cues': args.convert_hot_cues
     }
-    
+
     success = conversion_orchestrator.convert(
         args.input_file,
         'Traktor',
@@ -69,7 +87,7 @@ def main():
         'Rekordbox',
         options
     )
-    
+
     if success:
         print(f"Library successfully converted to Rekordbox format: {args.output_file}")
         return 0

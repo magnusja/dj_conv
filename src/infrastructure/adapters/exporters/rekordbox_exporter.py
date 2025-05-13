@@ -54,14 +54,23 @@ class RekordboxExporter(ExporterInterface):
 
             # Add playlists
             playlists_elem = ET.SubElement(root, 'PLAYLISTS')
+            # First, get all playlists that don't have a parent or are direct children of the root
+            root_playlists = []
+            for playlist_id, playlist in collection.playlists.items():
+                # If it's a root playlist or a child of the root playlist
+                if playlist.parent_id is None or (collection.root_playlists and str(playlist.parent_id) == str(collection.root_playlists[0])):
+                    root_playlists.append(playlist_id)
+
             root_node = ET.SubElement(playlists_elem, 'NODE', {
                 'Type': '0',
                 'Name': 'ROOT',
-                'Count': str(len(collection.root_playlists))
+                'Count': str(len(root_playlists))
             })
 
             # Add root playlists
-            for playlist_id in collection.root_playlists:
+
+            # Now add all these playlists to the root node
+            for playlist_id in root_playlists:
                 playlist = collection.get_playlist(playlist_id)
                 if playlist:
                     self._add_playlist_to_node(playlist, root_node, collection, options)

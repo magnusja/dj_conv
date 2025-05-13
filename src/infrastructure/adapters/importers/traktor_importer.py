@@ -6,6 +6,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from uuid import uuid4
 import xml.etree.ElementTree as ET
+import logging
+
+logger = logging.getLogger('dj_conv')
 
 from src.domain.entities.collection import Collection
 from src.domain.entities.track import Track
@@ -199,21 +202,30 @@ class TraktorImporter(ImporterInterface):
         """Import playlists from the NML file"""
         playlists_node = root.find('.//PLAYLISTS')
         if playlists_node is None:
+            logger.warning("No PLAYLISTS node found in the NML file")
             return
 
         # Find all root nodes (could be folders or playlists)
         root_nodes = playlists_node.findall('./NODE')
+        logger.info(f"Found {len(root_nodes)} root playlist nodes")
+
         if not root_nodes:
+            logger.warning("No playlist nodes found under PLAYLISTS")
             return
 
         # Process all playlists recursively
         for node in root_nodes:
+            node_type = node.get('TYPE', '')
+            node_name = node.get('NAME', '')
+            logger.info(f"Processing root playlist node: {node_name} (Type: {node_type})")
             self._process_playlist_node(node, None, collection)
 
     def _process_playlist_node(self, node: ET.Element, parent_id: Optional[str], collection: Collection):
         """Process a playlist node recursively"""
         node_type = node.get('TYPE', '')
         node_name = node.get('NAME', '')
+
+        logger.info(f"Processing playlist node: {node_name} (Type: {node_type})")
 
         if node_type == 'FOLDER':
             # Create a folder playlist
@@ -222,15 +234,20 @@ class TraktorImporter(ImporterInterface):
                 parent_id=parent_id
             )
             playlist_id = collection.add_playlist(playlist)
+            logger.info(f"Created folder playlist: {node_name} (ID: {playlist_id})")
 
             # Process child nodes (SUBNODES in Traktor)
             subnodes = node.find('./SUBNODES')
             if subnodes is not None:
-                for child in subnodes.findall('./NODE'):
+                child_nodes = subnodes.findall('./NODE')
+                logger.info(f"Found {len(child_nodes)} child nodes in SUBNODES for {node_name}")
+                for child in child_nodes:
                     self._process_playlist_node(child, playlist_id, collection)
             else:
                 # Try direct child nodes as well
-                for child in node.findall('./NODE'):
+                child_nodes = node.findall('./NODE')
+                logger.info(f"Found {len(child_nodes)} direct child nodes for {node_name}")
+                for child in child_nodes:
                     self._process_playlist_node(child, playlist_id, collection)
 
         elif node_type == 'PLAYLIST':
@@ -240,19 +257,26 @@ class TraktorImporter(ImporterInterface):
                 parent_id=parent_id
             )
             playlist_id = collection.add_playlist(playlist)
+            logger.info(f"Created regular playlist: {node_name} (ID: {playlist_id})")
 
             # Find the PLAYLIST element
             playlist_elem = node.find('./PLAYLIST')
             if playlist_elem is None:
+                logger.warning(f"No PLAYLIST element found for node {node_name}")
                 return
 
             # Add tracks to the playlist
-            for entry in playlist_elem.findall('./ENTRY'):
+            entries = playlist_elem.findall('./ENTRY')
+            logger.info(f"Found {len(entries)} entries in playlist {node_name}")
+
+            for entry in entries:
                 location = entry.find('./PRIMARYKEY')
                 if location is not None:
                     # Get the track key (full path in Traktor format)
                     track_key = location.get('KEY', '')
+                    logger.debug(f"Found track key: {track_key}")
                     if not track_key:
+                        logger.warning("Entry has PRIMARYKEY but no KEY attribute")
                         continue
 
                     # Convert Traktor path format to standard path
@@ -289,3 +313,8 @@ class TraktorImporter(ImporterInterface):
                         playlist = collection.get_playlist(playlist_id)
                         if playlist:
                             playlist.add_track(track.id)
+                            logger.info(f"Added track '{track.title}' to playlist '{playlist.name}'")
+                        else:
+                            logger.warning(f"Could not find playlist with ID {playlist_id}")
+                    else:
+                        logger.warning(f"Could not find track for key: {track_key}")
