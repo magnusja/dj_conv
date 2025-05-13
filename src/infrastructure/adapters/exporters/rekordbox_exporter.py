@@ -19,15 +19,15 @@ class RekordboxExporter(ExporterInterface):
     """
     Exporter for Pioneer Rekordbox library (XML format)
     """
-    
+
     @property
     def format_name(self) -> str:
         return "Rekordbox"
-    
+
     def export_library(self, collection: Collection, file_path: str, options: Dict[str, Any] = None) -> bool:
         """Export a collection to a Rekordbox XML file"""
         options = options or {}
-        
+
         try:
             # Create the root element
             root = ET.Element('DJ_PLAYLISTS', {
@@ -35,23 +35,23 @@ class RekordboxExporter(ExporterInterface):
                 'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
                 'xsi:noNamespaceSchemaLocation': 'https://raw.githubusercontent.com/rekordbox/xml-schema/master/rekordbox_xml_schema.xsd'
             })
-            
+
             # Add product info
             product = ET.SubElement(root, 'PRODUCT', {
                 'Name': 'DJ Library Converter',
                 'Version': '1.0.0',
                 'Company': 'DJ Library Converter'
             })
-            
+
             # Add collection
             collection_elem = ET.SubElement(root, 'COLLECTION', {
                 'Entries': str(len(collection.tracks))
             })
-            
+
             # Add tracks to collection
             for track_id, track in collection.tracks.items():
                 self._add_track_to_collection(track, collection_elem, options)
-            
+
             # Add playlists
             playlists_elem = ET.SubElement(root, 'PLAYLISTS')
             root_node = ET.SubElement(playlists_elem, 'NODE', {
@@ -59,29 +59,29 @@ class RekordboxExporter(ExporterInterface):
                 'Name': 'ROOT',
                 'Count': str(len(collection.root_playlists))
             })
-            
+
             # Add root playlists
             for playlist_id in collection.root_playlists:
                 playlist = collection.get_playlist(playlist_id)
                 if playlist:
                     self._add_playlist_to_node(playlist, root_node, collection, options)
-            
+
             # Write the XML file
             tree = ET.ElementTree(root)
-            
+
             # Pretty print the XML
             xml_string = ET.tostring(root, encoding='utf-8')
             dom = minidom.parseString(xml_string)
             pretty_xml = dom.toprettyxml(indent="  ")
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(pretty_xml)
-                
+
             return True
         except Exception as e:
             print(f"Error exporting Rekordbox library: {str(e)}")
             return False
-    
+
     def _add_track_to_collection(self, track: Track, collection_elem: ET.Element, options: Dict[str, Any]):
         """Add a track to the collection element"""
         # Create track element
@@ -98,33 +98,57 @@ class RekordboxExporter(ExporterInterface):
             'AverageBpm': str(track.bpm),
             'DateAdded': datetime.now().strftime('%Y-%m-%d')
         })
-        
+
         # Add cue points
         self._add_cue_points_to_track(track, track_elem, options)
-        
+
     def _format_location(self, file_path: str) -> str:
         """Format a file path for Rekordbox XML"""
+        # Normalize path separators first
+        normalized_path = file_path.replace('\\', '/').replace('/:', '/')
+
+        # Handle Traktor-style paths (with colons)
+        if ':/' in normalized_path and not normalized_path.startswith('file://'):
+            # Split by volume and path
+            parts = normalized_path.split(':/', 1)
+            if len(parts) == 2:
+                volume, path = parts
+                normalized_path = f"{volume}/{path}"
+
+        # Make sure there are no double slashes (except for the protocol part)
+        while '//' in normalized_path and not normalized_path.startswith('file://'):
+            normalized_path = normalized_path.replace('//', '/')
+
         # Convert to URI format
         if os.name == 'nt':  # Windows
             # Handle Windows paths
-            if file_path.startswith('\\\\'):  # UNC path
-                return 'file:///' + file_path.replace('\\', '/')
+            if normalized_path.startswith('//'):  # UNC path
+                return 'file:///' + normalized_path
+            elif ':' in normalized_path and not normalized_path.startswith('file://'):
+                # Has a drive letter
+                return 'file:///' + normalized_path
             else:
-                return 'file:///' + file_path.replace('\\', '/').lstrip('/')
+                return 'file:///' + normalized_path.lstrip('/')
         else:  # Unix/Mac
-            return 'file://' + file_path
-    
+            # For macOS, ensure the path starts with a volume name
+            if normalized_path.startswith('Macintosh HD'):
+                return 'file:///' + normalized_path
+            elif not normalized_path.startswith('/'):
+                return 'file:///' + normalized_path
+            else:
+                return 'file://' + normalized_path
+
     def _add_cue_points_to_track(self, track: Track, track_elem: ET.Element, options: Dict[str, Any]):
         """Add cue points to a track element"""
         convert_hot_cues = options.get('convert_hot_cues_to_memory_cues', False)
-        
+
         for cue in track.cue_points:
             cue_type = 0  # Memory cue
             if cue.type == CueType.HOT_CUE and not convert_hot_cues:
                 cue_type = 1  # Hot cue
-            
+
             position_ms = int(cue.position * 1000)  # Convert to milliseconds
-            
+
             # Create cue point element
             cue_elem = ET.SubElement(track_elem, 'POSITION_MARK', {
                 'Name': cue.name,
@@ -132,12 +156,12 @@ class RekordboxExporter(ExporterInterface):
                 'Start': str(position_ms),
                 'Num': str(cue.index if cue.index >= 0 else 0)
             })
-        
+
         # Add loops
         for loop in track.loops:
             start_ms = int(loop.start_position * 1000)  # Convert to milliseconds
             end_ms = int(loop.end_position * 1000)  # Convert to milliseconds
-            
+
             # Create loop element
             loop_elem = ET.SubElement(track_elem, 'POSITION_MARK', {
                 'Name': loop.name,
@@ -146,7 +170,7 @@ class RekordboxExporter(ExporterInterface):
                 'End': str(end_ms),
                 'Num': str(loop.index if loop.index >= 0 else 0)
             })
-    
+
     def _add_playlist_to_node(self, playlist: Playlist, parent_node: ET.Element, collection: Collection, options: Dict[str, Any]):
         """Add a playlist to a node element recursively"""
         # Check if this is a folder or a regular playlist
@@ -157,7 +181,7 @@ class RekordboxExporter(ExporterInterface):
                 'Name': playlist.name,
                 'Count': str(len(playlist.children))
             })
-            
+
             # Add child playlists
             for child in playlist.children:
                 self._add_playlist_to_node(child, folder_node, collection, options)
@@ -169,7 +193,7 @@ class RekordboxExporter(ExporterInterface):
                 'KeyType': '0',
                 'Entries': str(len(playlist.track_ids))
             })
-            
+
             # Add tracks to playlist
             for track_id in playlist.track_ids:
                 track = collection.get_track(track_id)
